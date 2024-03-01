@@ -55,6 +55,7 @@ namespace UnityEditor.Rendering.Universal
         SerializedProperty m_Offset;
         SerializedProperty[] m_OffsetValues;
         SerializedProperty m_FadeFactor;
+        SerializedProperty m_RenderingLayerMask;
 
         int layerMask => (target as Component).gameObject.layer;
         bool layerMaskHasMultipleValues
@@ -181,6 +182,7 @@ namespace UnityEditor.Rendering.Universal
                 m_Offset.FindPropertyRelative("z"),
             };
             m_FadeFactor = serializedObject.FindProperty("m_FadeFactor");
+            m_RenderingLayerMask = serializedObject.FindProperty("m_DecalLayerMask");
 
             ReinitSavedRatioSizePivotPosition();
         }
@@ -395,6 +397,12 @@ namespace UnityEditor.Rendering.Universal
         [DrawGizmo(GizmoType.Selected | GizmoType.Active)]
         static void DrawGizmosSelected(DecalProjector decalProjector, GizmoType gizmoType)
         {
+            float lod = Gizmos.CalculateLOD(decalProjector.transform.position, decalProjector.size.magnitude * 0.25f);
+
+            // skip drawing anything if it will be too small or behind the camera on screen
+            if (lod < 0.1f)
+                return;
+
             UpdateColorsInHandlesIfRequired();
 
             const float k_DotLength = 5f;
@@ -410,37 +418,45 @@ namespace UnityEditor.Rendering.Universal
                 boxHandle.size = scaledSize;
                 bool isVolumeEditMode = editMode == k_EditShapePreservingUV || editMode == k_EditShapeWithoutPreservingUV;
                 bool isPivotEditMode = editMode == k_EditUVAndPivot;
-                boxHandle.DrawHull(isVolumeEditMode);
-
-                Vector3 pivot = Vector3.zero;
-                Vector3 projectedPivot = new Vector3(0, 0, scaledPivot.z - .5f * scaledSize.z);
-
-                if (isPivotEditMode)
+                if (lod > 0.5f)
                 {
-                    Handles.DrawDottedLines(new[] { projectedPivot, pivot }, k_DotLength);
+                    boxHandle.DrawHull(isVolumeEditMode);
                 }
                 else
+                    Handles.DrawWireCube(scaledPivot, scaledSize); // simplify the drawing if too small on screen
+
+                if (lod == 1.0f) // only draw when big enough on screen to be useable
                 {
-                    float arrowSize = scaledSize.z * 0.25f;
-                    Handles.ArrowHandleCap(0, projectedPivot, Quaternion.identity, arrowSize, EventType.Repaint);
-                }
+                    Vector3 pivot = Vector3.zero;
+                    Vector3 projectedPivot = new Vector3(0, 0, scaledPivot.z - .5f * scaledSize.z);
 
-                //draw UV and bolder edges
-                using (new Handles.DrawingScope(Matrix4x4.TRS(decalProjector.transform.position + decalProjector.transform.rotation * new Vector3(scaledPivot.x, scaledPivot.y, scaledPivot.z - .5f * scaledSize.z), decalProjector.transform.rotation, Vector3.one)))
-                {
-                    Vector2 UVSize = new Vector2(
-                        (decalProjector.uvScale.x > k_Limit || decalProjector.uvScale.x < -k_Limit) ? 0f : scaledSize.x / decalProjector.uvScale.x,
-                        (decalProjector.uvScale.y > k_Limit || decalProjector.uvScale.y < -k_Limit) ? 0f : scaledSize.y / decalProjector.uvScale.y
-                    );
-                    Vector2 UVCenter = UVSize * .5f - new Vector2(decalProjector.uvBias.x * UVSize.x, decalProjector.uvBias.y * UVSize.y) - (Vector2)scaledSize * .5f;
+                    if (isPivotEditMode)
+                    {
+                        Handles.DrawDottedLines(new[] { projectedPivot, pivot }, k_DotLength);
+                    }
+                    else
+                    {
+                        float arrowSize = scaledSize.z * 0.25f;
+                        Handles.ArrowHandleCap(0, projectedPivot, Quaternion.identity, arrowSize, EventType.Repaint);
+                    }
 
-                    uvHandles.center = UVCenter;
-                    uvHandles.size = UVSize;
-                    uvHandles.DrawRect(dottedLine: true, screenSpaceSize: k_DotLength);
+                    //draw UV and bolder edges
+                    using (new Handles.DrawingScope(Matrix4x4.TRS(decalProjector.transform.position + decalProjector.transform.rotation * new Vector3(scaledPivot.x, scaledPivot.y, scaledPivot.z - .5f * scaledSize.z), decalProjector.transform.rotation, Vector3.one)))
+                    {
+                        Vector2 UVSize = new Vector2(
+                            (decalProjector.uvScale.x > k_Limit || decalProjector.uvScale.x < -k_Limit) ? 0f : scaledSize.x / decalProjector.uvScale.x,
+                            (decalProjector.uvScale.y > k_Limit || decalProjector.uvScale.y < -k_Limit) ? 0f : scaledSize.y / decalProjector.uvScale.y
+                        );
+                        Vector2 UVCenter = UVSize * .5f - new Vector2(decalProjector.uvBias.x * UVSize.x, decalProjector.uvBias.y * UVSize.y) - (Vector2)scaledSize * .5f;
 
-                    uvHandles.center = default;
-                    uvHandles.size = scaledSize;
-                    uvHandles.DrawRect(dottedLine: false, thickness: 3f);
+                        uvHandles.center = UVCenter;
+                        uvHandles.size = UVSize;
+                        uvHandles.DrawRect(dottedLine: true, screenSpaceSize: k_DotLength);
+
+                        uvHandles.center = default;
+                        uvHandles.size = scaledSize;
+                        uvHandles.DrawRect(dottedLine: false, thickness: 3f);
+                    }
                 }
             }
         }
@@ -486,7 +502,7 @@ namespace UnityEditor.Rendering.Universal
                 if (float.IsNaN(saved[axe]))
                 {
                     float oldSize = currentTarget.m_Size[axe];
-                    saved[axe] =  Mathf.Abs(oldSize) <= Mathf.Epsilon ? 0f : currentTarget.m_Offset[axe] / oldSize;
+                    saved[axe] = Mathf.Abs(oldSize) <= Mathf.Epsilon ? 0f : currentTarget.m_Offset[axe] / oldSize;
                     ratioSizePivotPositionSaved[currentTarget] = saved;
                 }
 
@@ -505,7 +521,15 @@ namespace UnityEditor.Rendering.Universal
 
             // update each target
             foreach (DecalProjector decalProjector in targets)
+            {
                 UpdateSizeOfOneTarget(decalProjector);
+
+                // Fix for UUM-29105 (Changes made to Decal Project Prefab in the Inspector are not saved)
+                // This editor doesn't use serializedObject to modify the target objects, explicitly mark the prefab
+                // asset dirty to ensure the new data is saved.
+                if (PrefabUtility.IsPartOfPrefabAsset(decalProjector))
+                    EditorUtility.SetDirty(decalProjector);
+            }
 
             // update again serialize object to register change in targets
             serializedObject.Update();
@@ -528,9 +552,7 @@ namespace UnityEditor.Rendering.Universal
 
             bool isDecalSupported = DecalProjector.isSupported;
             if (!isDecalSupported)
-            {
-                EditorGUILayout.HelpBox("No renderer has a Decal Renderer Feature added.", MessageType.Warning);
-            }
+                EditorUtils.FeatureHelpBox("The current renderer has no Decal Renderer Feature added.", MessageType.Warning);
 
             EditorGUI.BeginChangeCheck();
             {
@@ -606,6 +628,8 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUI.BeginChangeCheck();
                 EditorGUILayout.PropertyField(m_MaterialProperty, k_MaterialContent);
                 materialChanged = EditorGUI.EndChangeCheck();
+
+                EditorUtils.DrawRenderingLayerMask(m_RenderingLayerMask, k_RenderingLayerMaskContent);
 
                 foreach (var target in targets)
                 {

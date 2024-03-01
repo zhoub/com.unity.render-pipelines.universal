@@ -1,12 +1,14 @@
 # Example: How to create a custom rendering effect using the Render Objects Renderer Feature
 
+URP draws objects in the **DrawOpaqueObjects** and **DrawTransparentObjects** passes. You might need to draw objects at a different point in the frame rendering, or interpret and write rendering data (like depth and stencil) in alternate ways. The [Render Objects Renderer Feature](renderer-feature-render-objects.md) lets you do such customizations by letting you draw objects on a certain layer, at a certain time, with specific overrides.
+
 The example on this page describes how to create a custom rendering effect with the Render Objects Renderer Feature.
 
 ## Example overview
 
 The example on this page demonstrates how to implement the following effect:
 
-* There is a character in the Scene.
+* There is a character in the scene.
 
     ![Character](../Images/how-to-render-objects/character.png)
 
@@ -24,7 +26,7 @@ This example requires the following:
 
 ## Create example Scene and GameObjects<a name="example-objects"></a>
 
-To follow the steps in this example, create a new Scene with the following GameObjects:
+To follow the steps in this example, create a new scene with the following GameObjects:
 
 1. Create a Cube. Set its **Scale** values so that it looks like a wall.
 
@@ -36,7 +38,7 @@ To follow the steps in this example, create a new Scene with the following GameO
 
     ![The character consisting of three capsules](../Images/how-to-render-objects/character-views-side-top-persp.png)
 
-    To make it easier to manipulate the character in the Scene, add the three Capsules as child GameObjects under the Character GameObject.
+    To make it easier to manipulate the character in the scene, add the three Capsules as child GameObjects under the Character GameObject.
 
     ![Character objects in Hierarchy](../Images/how-to-render-objects/character-in-hierarchy.png)
 
@@ -46,7 +48,7 @@ Now you have the setup necessary to follow the steps in this example.
 
 ## Example implementation
 
-This section assumes that you created a Scene as described in section [Example Scene and GameObjects](#example-objects).
+This section assumes that you created a scene as described in section [Example scene and GameObjects](#example-objects).
 
 The example implementation uses two Render Objects Renderer Features: one to draw parts of the character that are behind other GameObjects, and another one to draw the parts of the character that are in front of other GameObjects.
 
@@ -68,15 +70,18 @@ Follow these steps to create a Renderer Feature to draw the character behind Gam
 
     ![Create new Layer called Character](../Images/how-to-render-objects/rendobj-new-layer-character.png)
 
-4. In the `DrawCharacterBehind` Renderer Feature, in **Filters** > **Layer Mask**, select `Character`. With this setting, this Renderer Feature renders GameObjects only in the Layer `Character`.
+4. Select the **Character** GameObject and assign it to the `Character` Layer. To do this, open the Layer drop down and select `Character`.
+    ![Assign Character GameObject to Character Layer](../Images/how-to-render-objects/rendobj-assign-character-gameobject-layer.png)
 
-5. In **Overrides** > **Material**, select the `CharacterBehindObjects` Material.
+5. In the `DrawCharacterBehind` Renderer Feature, in **Filters** > **Layer Mask**, select `Character`. With this setting, this Renderer Feature renders GameObjects only in the Layer `Character`.
+
+6. In **Overrides** > **Material**, select the `CharacterBehindObjects` Material.
 
     The Renderer Feature overrides the Material of a GameObject with the selected Material.
 
     ![Layer Mask, Material Override](../Images/how-to-render-objects/rendobj-change-layer-override-material.png)
 
-6. The intended behavior is that the Renderer Feature renders the character with the `CharacterBehindObjects` Material only when the character is behind other GameObjects.
+7. The intended behavior is that the Renderer Feature renders the character with the `CharacterBehindObjects` Material only when the character is behind other GameObjects.
 
     To achieve this, select the **Depth** check box, and set the **Depth Test** property to **Greater**.
 
@@ -85,7 +90,6 @@ Follow these steps to create a Renderer Feature to draw the character behind Gam
 With these settings, Unity renders the character with the `CharacterBehindObjects` Material only when the character is behind another GameObject. However, Unity also renders parts of the character using the `CharacterBehindObjects` Material, because some parts of the character occlude the character itself.
 
 ![Unity renders parts of the character using the `CharacterBehindObjects` Material](../Images/how-to-render-objects/character-depth-test-greater.gif)
-
 
 ### Create an extra Renderer Feature to avoid the self see-through effect
 
@@ -113,7 +117,7 @@ The following steps describe how to avoid such behavior and ensure that Unity dr
 
 3. In the `Character` Renderer Feature, in **Filters** > **Layer Mask**, select the `Character` Layer.
 
-    ![](../Images/how-to-render-objects/rendobj-render-objects-character.png)
+    ![Set Layer Mask Filter to Character Layer](../Images/how-to-render-objects/rendobj-render-objects-character.png)
 
     Now Unity renders the character with the `Character` Material even when the character is behind GameObjects.
 
@@ -134,5 +138,3 @@ With the extra `Character` Renderer Feature, Unity renders GameObjects as follow
 2. The `DrawCharacterBehind` Renderer Feature draws parts of the character that are behind other GameObjects. This happens in the **AfterRenderingOpaques** event.
 
 3. The `Character` Renderer Feature draws parts of the character that are in front of other GameObjects. This happens in the **AfterRenderingOpaques** event, and after executing the `DrawCharacterBehind` Renderer Feature.
-
-To see another use case of the Render Objects Renderer Feature, refer to the **Object Occlusion** Scene in the [Universal Rendering Examples](https://github.com/Unity-Technologies/UniversalRenderingExamples) project.

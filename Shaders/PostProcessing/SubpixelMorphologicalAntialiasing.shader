@@ -7,11 +7,7 @@ Shader "Hidden/Universal Render Pipeline/SubpixelMorphologicalAntialiasing"
     }
 
     HLSLINCLUDE
-
         #pragma multi_compile_local _SMAA_PRESET_LOW _SMAA_PRESET_MEDIUM _SMAA_PRESET_HIGH
-        #pragma multi_compile _ _USE_DRAW_PROCEDURAL
-        #pragma exclude_renderers gles
-
     ENDHLSL
 
     SubShader
@@ -52,6 +48,7 @@ Shader "Hidden/Universal Render Pipeline/SubpixelMorphologicalAntialiasing"
 
             HLSLPROGRAM
 
+                #define USE_FULL_PRECISION_BLIT_TEXTURE 1
                 #pragma vertex VertBlend
                 #pragma fragment FragBlend
                 #include "SubpixelMorphologicalAntialiasingBridge.hlsl"

@@ -1,19 +1,25 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEditor.Rendering.Analytics;
+using UnityEditor.Rendering.Universal.Analytics;
 using UnityEditor.Rendering.Universal.ShaderGUI;
 using UnityEditor.ShaderGraph;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using static Unity.Rendering.Universal.ShaderUtils;
+using BlendMode = UnityEngine.Rendering.BlendMode;
 
 namespace UnityEditor.Rendering.Universal
 {
     class MaterialModificationProcessor : AssetModificationProcessor
     {
+        const string k_MaterialExtension = ".mat";
+
         static void OnWillCreateAsset(string asset)
         {
-            if (!asset.ToLowerInvariant().EndsWith(".mat"))
+            if (!asset.HasExtension(k_MaterialExtension))
             {
                 return;
             }
@@ -27,21 +33,8 @@ namespace UnityEditor.Rendering.Universal
 
         static void ReimportAllMaterials()
         {
-            string[] guids = AssetDatabase.FindAssets("t:material", null);
-            // There can be several materials subAssets per guid ( ie : FBX files ), remove duplicate guids.
-            var distinctGuids = guids.Distinct();
-
-            int materialIdx = 0;
-            int totalMaterials = distinctGuids.Count();
-            foreach (var asset in distinctGuids)
-            {
-                materialIdx++;
-                var path = AssetDatabase.GUIDToAssetPath(asset);
-                EditorUtility.DisplayProgressBar("Material Upgrader re-import", string.Format("({0} of {1}) {2}", materialIdx, totalMaterials, path), (float)materialIdx / (float)totalMaterials);
-                AssetDatabase.ImportAsset(path);
-            }
-            EditorUtility.ClearProgressBar();
-
+            AssetReimportUtils.ReimportAll<Material>(out var duration, out var numberOfAssetsReimported);
+            AssetReimporterAnalytic.Send<Material>(duration, numberOfAssetsReimported);
             MaterialPostprocessor.s_NeedsSavingAssets = true;
         }
 
@@ -50,6 +43,9 @@ namespace UnityEditor.Rendering.Universal
         {
             EditorApplication.update += () =>
             {
+                if (GraphicsSettings.currentRenderPipeline is not UniversalRenderPipelineAsset universalRenderPipeline)
+                    return;
+
                 if (Time.renderedFrameCount > 0)
                 {
                     bool fileExist = true;
@@ -91,7 +87,7 @@ namespace UnityEditor.Rendering.Universal
         internal static List<string> s_ImportedAssetThatNeedSaving = new List<string>();
         internal static bool s_NeedsSavingAssets = false;
 
-        internal static readonly Action<Material, ShaderID>[] k_Upgraders = { UpgradeV1, UpgradeV2, UpgradeV3, UpgradeV4, UpgradeV5 };
+        internal static readonly Action<Material, ShaderID>[] k_Upgraders = { UpgradeV1, UpgradeV2, UpgradeV3, UpgradeV4, UpgradeV5, UpgradeV6, UpgradeV7, UpgradeV8, UpgradeV9 };
 
         static internal void SaveAssetsToDisk()
         {
@@ -184,7 +180,7 @@ namespace UnityEditor.Rendering.Universal
                     AssetDatabase.AddObjectToAsset(assetVersion, asset);
                 }
 
-                while (assetVersion.version < k_Upgraders.Length)
+                while (assetVersion.version >= 0 && assetVersion.version < k_Upgraders.Length)
                 {
                     k_Upgraders[assetVersion.version](material, shaderID);
                     debug += $" upgrading:v{assetVersion.version} to v{assetVersion.version + 1}";
@@ -287,7 +283,7 @@ namespace UnityEditor.Rendering.Universal
         }
 
         static void UpgradeV4(Material material, ShaderID shaderID)
-        {}
+        { }
 
         static void UpgradeV5(Material material, ShaderID shaderID)
         {
@@ -306,6 +302,128 @@ namespace UnityEditor.Rendering.Universal
                 {
                     material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
                 }
+            }
+        }
+
+        // Separate Preserve Specular Lighting from Premultiplied blend mode.
+        // Update materials params for backwards compatibility. (Keep the same end result).
+        // - Previous (incorrect) premultiplied blend mode --> Alpha blend mode + Preserve Specular Lighting
+        // - Otherwise keep the blend mode and disable Preserve Specular Lighting
+        // - Correct premultiply mode is not possible in V5.
+        //
+        // This is run both hand-written and shadergraph materials.
+        //
+        // Hand-written and overridable shadergraphs always have blendModePreserveSpecular property, which
+        // is assumed to be new since we only run this for V5 -> V6 upgrade.
+        //
+        // Fixed shadergraphs do not have this keyword and are filtered out.
+        // The blend mode is baked in the generated shader, so there's no material properties to be upgraded.
+        // The shadergraph upgrade on re-import will handle the fixed shadergraphs.
+        static void UpgradeV6(Material material, ShaderID shaderID)
+        {
+            var surfaceTypePID = Shader.PropertyToID(Property.SurfaceType);
+            bool isTransparent = material.HasProperty(surfaceTypePID) && material.GetFloat(surfaceTypePID) >= 1.0f;
+
+            if (isTransparent)
+            {
+                if (shaderID == ShaderID.Unlit)
+                {
+                    var blendModePID = Shader.PropertyToID(Property.BlendMode);
+                    var blendMode = (BaseShaderGUI.BlendMode)material.GetFloat(blendModePID);
+
+                    // Premultiply used to be "Premultiply (* alpha in shader)" aka Alpha blend
+                    if (blendMode == BaseShaderGUI.BlendMode.Premultiply)
+                        material.SetFloat(blendModePID, (float)BaseShaderGUI.BlendMode.Alpha);
+                }
+                else
+                {
+                    var blendModePreserveSpecularPID = Shader.PropertyToID(Property.BlendModePreserveSpecular);
+                    if (material.HasProperty(blendModePreserveSpecularPID))
+                    {
+                        // TL;DR; As Complex Lit was not being versioned before we want to only upgrade it in certain
+                        // cases to not alter visuals
+                        //
+                        // To elaborate, this is needed for the following reasons:
+                        // 1) Premultiplied used to mean something different before V6
+                        // 2) If the update is applied twice it will change visuals
+                        // 3) As Complex Lit was missing form the ShaderID enum it was never being upgraded, so its
+                        //    version is not a reliable indicator of which version of Premultiplied alpha the user
+                        //    had intended (e.g. the URP Foundation test project is currently at V7 but some
+                        //    Complex Lit materials are at V3)
+                        // 5) To determine the intended version we can check which version the project is being upgraded
+                        //    from (as we can then know which version it was being actually used as). If the project is
+                        //    at version 6 or higher then we know that if the user had selected Premultiplied it is
+                        //    already working based on the new interpretation and should not be changed
+                        bool skipChangingBlendMode = shaderID == ShaderID.ComplexLit &&
+                                          UniversalProjectSettings.materialVersionForUpgrade >= 6;
+
+                        var blendModePID = Shader.PropertyToID(Property.BlendMode);
+                        var blendMode = (BaseShaderGUI.BlendMode)material.GetFloat(blendModePID);
+                        if (blendMode == BaseShaderGUI.BlendMode.Premultiply && !skipChangingBlendMode)
+                        {
+                            material.SetFloat(blendModePID, (float)BaseShaderGUI.BlendMode.Alpha);
+                            material.SetFloat(blendModePreserveSpecularPID, 1.0f);
+                        }
+                        else
+                        {
+                            material.SetFloat(blendModePreserveSpecularPID, 0.0f);
+                        }
+
+                        BaseShaderGUI.SetMaterialKeywords(material);
+                    }
+                }
+            }
+        }
+
+        // Upgrades alpha-clipped materials to include logic for automatic alpha-to-coverage support
+        static void UpgradeV7(Material material, ShaderID shaderID)
+        {
+            var surfacePropertyID = Shader.PropertyToID(Property.SurfaceType);
+            var alphaClipPropertyID = Shader.PropertyToID(Property.AlphaClip);
+            var alphaToMaskPropertyID = Shader.PropertyToID(Property.AlphaToMask);
+            if (material.HasProperty(surfacePropertyID) &&
+                material.HasProperty(alphaClipPropertyID) &&
+                material.HasProperty(alphaToMaskPropertyID))
+            {
+                bool isOpaque = material.GetFloat(surfacePropertyID) < 1.0f;
+                bool isAlphaClipEnabled = material.GetFloat(alphaClipPropertyID) > 0.0f;
+
+                float alphaToMask = (isOpaque && isAlphaClipEnabled) ? 1.0f : 0.0f;
+
+                material.SetFloat(alphaToMaskPropertyID, alphaToMask);
+            }
+        }
+
+        // We need to disable the passes with a { "LightMode" = "MotionVectors" } tag for URP shaders that have them,
+        // otherwise they'll be rendered for static objects (transform not moving and no skeletal animation) regressing MV perf.
+        //
+        // This is now needed as most URP material types have their own dedicated MV pass (this is so they work with
+        // Alpha-Clipping which needs per material data and not just generic vertex data like for the override shader).
+        //
+        // In Unity (both Built-in and SRP), the MV pass will be used even if disabled on frames where the object's
+        // transform changes or there's skeletal animation. But for URP disabling wasn't necessary before as the single
+        // object MV override shader was only used when needed (and there wasn't even anything to disable per material)
+        //
+        // N.B. the SetShaderPassEnabled API takes a tag value corresponding to the "LightMode" key and not a pass name
+        static void UpgradeV8(Material material, ShaderID shaderID)
+        {
+            if (HasMotionVectorLightModeTag(shaderID))
+                material.SetShaderPassEnabled(MotionVectorRenderPass.k_MotionVectorsLightModeTag, false);
+        }
+
+        // We want to disable the custom motion vector pass for SpeedTrees which won't have any
+        // vertex animation due to no wind. This is done to prevent performance regression from
+        // rendering trees with no motion vector output. 
+        static void UpgradeV9(Material material, ShaderID shaderID)
+        {
+            if(shaderID != ShaderID.SpeedTree8)
+                return;
+
+            // Check if the material is a SpeedTree material and whether it has wind turned on or off.
+            if(SpeedTree8MaterialUpgrader.DoesMaterialHaveSpeedTreeWindKeyword(material))
+            {
+                bool motionVectorPassEnabled = SpeedTree8MaterialUpgrader.IsWindEnabled(material);
+                material.SetShaderPassEnabled(MotionVectorRenderPass.k_MotionVectorsLightModeTag, motionVectorPassEnabled);
             }
         }
     }
@@ -390,7 +508,7 @@ namespace UnityEditor.Rendering.Universal
                 throw new ArgumentNullException("material");
 
             var smoothnessSource = 1 - (int)material.GetFloat("_GlossinessSource");
-            material.SetFloat("_SmoothnessSource" , smoothnessSource);
+            material.SetFloat("_SmoothnessSource", smoothnessSource);
             if (material.GetTexture("_SpecGlossMap") == null)
             {
                 var col = material.GetColor("_SpecColor");

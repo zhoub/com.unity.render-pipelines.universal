@@ -3,7 +3,7 @@
 #ifndef UNIVERSAL_SHADER_VARIABLES_INCLUDED
 #define UNIVERSAL_SHADER_VARIABLES_INCLUDED
 
-#if defined(STEREO_INSTANCING_ON) && (defined(SHADER_API_D3D11) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_PSSL) || defined(SHADER_API_VULKAN))
+#if defined(STEREO_INSTANCING_ON) && (defined(SHADER_API_D3D11) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_PSSL) || defined(SHADER_API_VULKAN) || (defined(SHADER_API_METAL) && !defined(UNITY_COMPILER_DXC)))
 #define UNITY_STEREO_INSTANCING_ENABLED
 #endif
 
@@ -11,7 +11,7 @@
     #define UNITY_STEREO_MULTIVIEW_ENABLED
 #endif
 
-#if defined(UNITY_SINGLE_PASS_STEREO) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
 #define USING_STEREO_MATRICES
 #endif
 
@@ -42,6 +42,7 @@ float4 _SinTime; // sin(t/8), sin(t/4), sin(t/2), sin(t)
 float4 _CosTime; // cos(t/8), cos(t/4), cos(t/2), cos(t)
 float4 unity_DeltaTime; // dt, 1/dt, smoothdt, 1/smoothdt
 float4 _TimeParameters; // t, sin(t), cos(t)
+float4 _LastTimeParameters; // t, sin(t), cos(t)
 
 #if !defined(USING_STEREO_MATRICES)
 float3 _WorldSpaceCameraPos;
@@ -84,6 +85,9 @@ float4 unity_OrthoParams;
 uniform float4 _ScaleBias;
 uniform float4 _ScaleBiasRt;
 
+// { w / RTHandle.maxWidth, h / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
+uniform float4 _RTHandleScale;
+
 float4 unity_CameraWorldClipPlanes[6];
 
 #if !defined(USING_STEREO_MATRICES)
@@ -97,6 +101,8 @@ float4x4 unity_CameraToWorld;
 #endif
 
 // ----------------------------------------------------------------------------
+
+#ifndef DOTS_INSTANCING_ON // UnityPerDraw cbuffer doesn't exist with hybrid renderer
 
 // Block Layout should be respected due to SRP Batcher
 CBUFFER_START(UnityPerDraw)
@@ -115,7 +121,7 @@ float4 unity_RenderingLayer;
 half4 unity_LightData;
 half4 unity_LightIndices[2];
 
-half4 unity_ProbesOcclusion;
+float4 unity_ProbesOcclusion;
 
 // Reflection Probe 0 block feature
 // HDR environment map decode instructions
@@ -142,6 +148,10 @@ real4 unity_SHBg;
 real4 unity_SHBb;
 real4 unity_SHC;
 
+// Renderer bounding box.
+float4 unity_RendererBounds_Min;
+float4 unity_RendererBounds_Max;
+
 // Velocity
 float4x4 unity_MatrixPreviousM;
 float4x4 unity_MatrixPreviousMI;
@@ -150,7 +160,17 @@ float4x4 unity_MatrixPreviousMI;
 //Z : Z bias value
 //W : Camera only
 float4 unity_MotionVectorsParams;
+
+// Sprite.
+float4 unity_SpriteColor;
+//X : FlipX
+//Y : FlipY
+//Z : Reserved for future use.
+//W : Reserved for future use.
+float4 unity_SpriteProps;
 CBUFFER_END
+
+#endif // UNITY_DOTS_INSTANCING_ENABLED
 
 #if defined(USING_STEREO_MATRICES)
 CBUFFER_START(UnityStereoViewBuffer)
@@ -165,7 +185,6 @@ float4x4 unity_StereoCameraProjection[2];
 float4x4 unity_StereoCameraInvProjection[2];
 
 float3   unity_StereoWorldSpaceCameraPos[2];
-float4   unity_StereoScaleOffset[2];
 CBUFFER_END
 #endif
 
@@ -183,10 +202,6 @@ CBUFFER_END
 UNITY_DECLARE_MULTIVIEW(2);
 #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
 static uint unity_StereoEyeIndex;
-#elif defined(UNITY_SINGLE_PASS_STEREO)
-CBUFFER_START(UnityStereoEyeIndex)
-int unity_StereoEyeIndex;
-CBUFFER_END
 #endif
 
 float4x4 glstate_matrix_transpose_modelview0;
@@ -250,9 +265,18 @@ SAMPLER(samplerunity_ShadowMasks);
 // TODO: all affine matrices should be 3x4.
 // TODO: sort these vars by the frequency of use (descending), and put commonly used vars together.
 // Note: please use UNITY_MATRIX_X macros instead of referencing matrix variables directly.
-float4x4 _PrevViewProjMatrix;
-float4x4 _ViewProjMatrix;
-float4x4 _NonJitteredViewProjMatrix;
+#if defined(USING_STEREO_MATRICES)
+float4x4 _PrevViewProjMatrixStereo[2];
+float4x4 _NonJitteredViewProjMatrixStereo[2];
+float4x4 _ViewProjMatrixStereo[2];
+#define  _PrevViewProjMatrix  _PrevViewProjMatrixStereo[unity_StereoEyeIndex]
+#define  _NonJitteredViewProjMatrix _NonJitteredViewProjMatrixStereo[unity_StereoEyeIndex]
+#define  _ViewProjMatrix      _ViewProjMatrixStereo[unity_StereoEyeIndex]
+#else
+float4x4 _PrevViewProjMatrix;         // non-jittered. Motion vectors.
+float4x4 _NonJitteredViewProjMatrix;  // non-jittered.
+float4x4 _ViewProjMatrix; // TODO: URP currently uses unity_MatrixVP, see Input.hlsl
+#endif
 float4x4 _ViewMatrix;
 float4x4 _ProjMatrix;
 float4x4 _InvViewProjMatrix;

@@ -5,8 +5,8 @@ namespace UnityEngine.Rendering.Universal
     [Conditional("UNITY_EDITOR")]
     internal class URPHelpURLAttribute : CoreRPHelpURLAttribute
     {
-        public URPHelpURLAttribute(string pageName)
-            : base(pageName, Documentation.packageName)
+        public URPHelpURLAttribute(string pageName, string pageHash = "")
+            : base(pageName, pageHash, Documentation.packageName)
         {
         }
     }
@@ -19,10 +19,10 @@ namespace UnityEngine.Rendering.Universal
         public const string packageName = "com.unity.render-pipelines.universal";
 
         /// <summary>
-        /// Generates a help url for the given package and page name
+        /// Generates a Universal Render Pipeline help url for the given page name
         /// </summary>
         /// <param name="pageName">The page name</param>
-        /// <returns>The full url page</returns>
+        /// <returns>The full url</returns>
         public static string GetPageLink(string pageName) => GetPageLink(packageName, pageName);
     }
 }

@@ -1,6 +1,8 @@
 using UnityEngine.Experimental.GlobalIllumination;
 using UnityEngine.Profiling;
 using Unity.Collections;
+using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Experimental.Rendering;
 
 // cleanup code
 // listMinDepth and maxDepth should be stored in a different uniform block?
@@ -26,20 +28,65 @@ namespace UnityEngine.Rendering.Universal.Internal
         // ScriptableRenderPass
         public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescripor)
         {
-            RenderTargetIdentifier lightingAttachmentId = m_DeferredLights.GbufferAttachmentIdentifiers[m_DeferredLights.GBufferLightingIndex];
-            RenderTargetIdentifier depthAttachmentId = m_DeferredLights.DepthAttachmentIdentifier;
+            var lightingAttachment = m_DeferredLights.GbufferAttachments[m_DeferredLights.GBufferLightingIndex];
+            var depthAttachment = m_DeferredLights.DepthAttachmentHandle;
             if (m_DeferredLights.UseRenderPass)
-                ConfigureInputAttachments(m_DeferredLights.DeferredInputAttachments);
+                ConfigureInputAttachments(m_DeferredLights.DeferredInputAttachments, m_DeferredLights.DeferredInputIsTransient);
 
-            // TODO: change to m_DeferredLights.GetGBufferFormat(m_DeferredLights.GBufferLightingIndex) when it's not GraphicsFormat.None
             // TODO: Cannot currently bind depth texture as read-only!
-            ConfigureTarget(lightingAttachmentId, depthAttachmentId, cameraTextureDescripor.graphicsFormat);
+            ConfigureTarget(lightingAttachment, depthAttachment);
         }
 
         // ScriptableRenderPass
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
-            m_DeferredLights.ExecuteDeferredPass(context, ref renderingData);
+            m_DeferredLights.ExecuteDeferredPass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), ref renderingData);
+        }
+
+        private class PassData
+        {
+            internal TextureHandle color;
+            internal TextureHandle depth;
+
+            internal RenderingData renderingData;
+            internal DeferredLights deferredLights;
+        }
+
+        internal void Render(RenderGraph renderGraph, TextureHandle color, TextureHandle depth, TextureHandle[] gbuffer, ref RenderingData renderingData)
+        {
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Deferred Lighting Pass", out var passData,
+                base.profilingSampler))
+            {
+                passData.color = builder.UseTextureFragment(color, 0, IBaseRenderGraphBuilder.AccessFlags.Write);
+                passData.depth = builder.UseTextureFragmentDepth(depth, IBaseRenderGraphBuilder.AccessFlags.Write);
+                passData.deferredLights = m_DeferredLights;
+                passData.renderingData = renderingData;
+
+                if (!m_DeferredLights.UseRenderPass)
+                {
+                    for (int i = 0; i < gbuffer.Length; ++i)
+                    {
+                        if (i != m_DeferredLights.GBufferLightingIndex)
+                            builder.UseTexture(gbuffer[i], IBaseRenderGraphBuilder.AccessFlags.Read);
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < gbuffer.Length; ++i)
+                    {
+                        if (i != m_DeferredLights.GBufferLightingIndex)
+                            builder.UseTextureFragmentInput(gbuffer[i], i, IBaseRenderGraphBuilder.AccessFlags.Read);
+                    }
+                }
+
+                builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
+
+                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
+                {
+                    data.deferredLights.ExecuteDeferredPass(context.cmd, ref data.renderingData);
+                });
+            }
         }
 
         // ScriptableRenderPass

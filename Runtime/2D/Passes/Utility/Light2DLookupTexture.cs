@@ -19,9 +19,9 @@ namespace UnityEngine.Rendering.Universal
             const int HEIGHT = 256;
 
             var textureFormat = GraphicsFormat.R8G8B8A8_UNorm;
-            if (RenderingUtils.SupportsGraphicsFormat(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.SetPixels))
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.SetPixels))
                 textureFormat = GraphicsFormat.R16G16B16A16_SFloat;
-            else if (RenderingUtils.SupportsGraphicsFormat(GraphicsFormat.R32G32B32A32_SFloat, FormatUsage.SetPixels))
+            else if (SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, GraphicsFormatUsage.SetPixels))
                 textureFormat = GraphicsFormat.R32G32B32A32_SFloat;
 
             var texture = new Texture2D(WIDTH, HEIGHT, textureFormat, TextureCreationFlags.None);
@@ -66,31 +66,31 @@ namespace UnityEngine.Rendering.Universal
             return texture;
         }
 
-//        private static Texture2D s_FalloffLookupTexture;
-//#if UNITY_EDITOR
-//        [MenuItem("Light2D Debugging/Write Light Texture")]
-//        static public void WriteLightTexture()
-//        {
-//            var path = EditorUtility.SaveFilePanel("Save texture as PNG", "", "LightLookupTexture.exr", "png");
+        //        private static Texture2D s_FalloffLookupTexture;
+        //#if UNITY_EDITOR
+        //        [MenuItem("Light2D Debugging/Write Light Texture")]
+        //        static public void WriteLightTexture()
+        //        {
+        //            var path = EditorUtility.SaveFilePanel("Save texture as PNG", "", "LightLookupTexture.exr", "png");
 
-//            CreatePointLightLookupTexture();
+        //            CreatePointLightLookupTexture();
 
-//            byte[] imgData = s_PointLightLookupTexture.EncodeToEXR(Texture2D.EXRFlags.CompressRLE);
-//            if (imgData != null)
-//                File.WriteAllBytes(path, imgData);
-//        }
+        //            byte[] imgData = s_PointLightLookupTexture.EncodeToEXR(Texture2D.EXRFlags.CompressRLE);
+        //            if (imgData != null)
+        //                File.WriteAllBytes(path, imgData);
+        //        }
 
-//        [MenuItem("Light2D Debugging/Write Falloff Texture")]
-//        static public void WriteCurveTexture()
-//        {
-//            var path = EditorUtility.SaveFilePanel("Save texture as PNG", "", "FalloffLookupTexture.png", "png");
+        //        [MenuItem("Light2D Debugging/Write Falloff Texture")]
+        //        static public void WriteCurveTexture()
+        //        {
+        //            var path = EditorUtility.SaveFilePanel("Save texture as PNG", "", "FalloffLookupTexture.png", "png");
 
-//            CreateFalloffLookupTexture();
+        //            CreateFalloffLookupTexture();
 
-//            byte[] imgData = s_FalloffLookupTexture.EncodeToPNG();
-//            if (imgData != null)
-//                File.WriteAllBytes(path, imgData);
-//        }
-//#endif
+        //            byte[] imgData = s_FalloffLookupTexture.EncodeToPNG();
+        //            if (imgData != null)
+        //                File.WriteAllBytes(path, imgData);
+        //        }
+        //#endif
     }
 }

@@ -1,25 +1,20 @@
-using UnityEngine;
-using System.Linq;
-using UnityEngine.Rendering.Universal;
 using System.Collections.Generic;
+using UnityEditorInternal;
+using UnityEngine;
+using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
     class SerializedUniversalRenderPipelineGlobalSettings
     {
         public SerializedObject serializedObject;
+
         private List<UniversalRenderPipelineGlobalSettings> serializedSettings = new List<UniversalRenderPipelineGlobalSettings>();
 
-        public SerializedProperty lightLayerName0;
-        public SerializedProperty lightLayerName1;
-        public SerializedProperty lightLayerName2;
-        public SerializedProperty lightLayerName3;
-        public SerializedProperty lightLayerName4;
-        public SerializedProperty lightLayerName5;
-        public SerializedProperty lightLayerName6;
-        public SerializedProperty lightLayerName7;
+        public SerializedProperty defaultVolumeProfile;
 
-        public SerializedProperty supportRuntimeDebugDisplay;
+        public SerializedProperty renderingLayerNames;
+        public ReorderableList renderingLayerNameList;
 
         public SerializedUniversalRenderPipelineGlobalSettings(SerializedObject serializedObject)
         {
@@ -34,17 +29,45 @@ namespace UnityEditor.Rendering.Universal
                     throw new System.Exception($"Target object has an invalid object, objects must be of type {typeof(UniversalRenderPipelineGlobalSettings)}");
             }
 
+            defaultVolumeProfile = serializedObject.FindProperty("m_DefaultVolumeProfile");
 
-            lightLayerName0 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName0);
-            lightLayerName1 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName1);
-            lightLayerName2 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName2);
-            lightLayerName3 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName3);
-            lightLayerName4 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName4);
-            lightLayerName5 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName5);
-            lightLayerName6 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName6);
-            lightLayerName7 = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.lightLayerName7);
+            renderingLayerNames = serializedObject.FindProperty("m_RenderingLayerNames");
 
-            supportRuntimeDebugDisplay = serializedObject.Find((UniversalRenderPipelineGlobalSettings s) => s.supportRuntimeDebugDisplay);
+            renderingLayerNameList = new ReorderableList(serializedObject, renderingLayerNames, false, false, true, true)
+            {
+                drawElementCallback = OnDrawElement,
+                onCanRemoveCallback = (ReorderableList list) => list.IsSelected(list.count - 1) && !list.IsSelected(0),
+                onCanAddCallback = (ReorderableList list) => list.count < 32,
+                onAddCallback = OnAddElement,
+            };
+        }
+
+        void OnAddElement(ReorderableList list)
+        {
+            int index = list.count;
+            list.serializedProperty.arraySize = list.count + 1;
+            list.serializedProperty.GetArrayElementAtIndex(index).stringValue = GetDefaultLayerName(index);
+        }
+
+        void OnDrawElement(Rect rect, int index, bool isActive, bool isFocused)
+        {
+            // For some reason given rect is not centered
+            rect.y += 2.5f;
+
+            SerializedProperty element = renderingLayerNameList.serializedProperty.GetArrayElementAtIndex(index);
+
+            EditorGUI.PropertyField(rect, element, EditorGUIUtility.TrTextContent($"Layer {index}"), true);
+
+            if (element.stringValue == "")
+            {
+                element.stringValue = GetDefaultLayerName(index);
+                serializedObject.ApplyModifiedProperties();
+            }
+        }
+
+        string GetDefaultLayerName(int index)
+        {
+            return index == 0 ? "Default" : $"Layer {index}";
         }
     }
 }

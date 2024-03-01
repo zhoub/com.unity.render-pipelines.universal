@@ -2,42 +2,39 @@
 #define UNIVERSAL_POSTPROCESSING_COMMON_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Fullscreen.hlsl"
+#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
 
-// ----------------------------------------------------------------------------------
-// Render fullscreen mesh by using a matrix set directly by the pipeline instead of
-// relying on the matrix set by the C++ engine to avoid issues with XR
+#if _FXAA
+// Notes on FXAA:
+// * We now rely on the official FXAA implementation (authored by Timothy Lottes while at NVIDIA)
+//   with minimal changes made by Unity to integrate with URP.
+// * The following 'Tweakable' defines are used by the FXAA implementation and can be changed if desired:
+//   * FXAA_PC set to 1 is the highest quality implementation ("PC" here is a misnomer, it will run on all platforms).
+//   * FXAA_PC set to 0 is the cheaper 'FXAA_PC_CONSOLE' variant
+//     (it's equivalent to URP's old implementation but less noisy and should run faster than before)
+//   * FXAA_GREEN_AS_LUMA can be set to 0 for an extra performance increase but will only antialias edges that have
+//     some green in them (will be visually equivalent on the vast majority of scenes).
+//   * FXAA_QUALITY__PRESET is used when FXAA_PC is set ot 1. We chose preset 12 as it runs almost as fast on Switch as
+//     our old noisy implementation did.
+//     On all other platforms we could basically get away with preset 15 which has slightly better edge quality.
 
-float4x4 _FullscreenProjMat;
-
-float4 TransformFullscreenMesh(half3 positionOS)
-{
-    return mul(_FullscreenProjMat, half4(positionOS, 1));
-}
-
-Varyings VertFullscreenMesh(Attributes input)
-{
-    Varyings output;
-    UNITY_SETUP_INSTANCE_ID(input);
-    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
-
-#if _USE_DRAW_PROCEDURAL
-    GetProceduralQuad(input.vertexID, output.positionCS, output.uv);
+// Tweakable params (can be changed to get different performance and quality tradeoffs)
+#if SHADER_API_PS5 && defined(HDR_INPUT)
+// The console implementation does not generate artefacts when the input pixels are in nits (monitor HDR range).
+#define FXAA_PC 0
 #else
-    output.positionCS = TransformFullscreenMesh(input.positionOS.xyz);
-    output.uv = input.uv;
+#define FXAA_PC 1
 #endif
+#define FXAA_GREEN_AS_LUMA 0
+#define FXAA_QUALITY__PRESET 12
 
-    return output;
-}
+// Fixed params (should not be changed)
+#define FXAA_HLSL_5 1
+#define FXAA_GATHER4_ALPHA 0
+#define FXAA_PC_CONSOLE !FXAA_PC
 
-// ----------------------------------------------------------------------------------
-// Samplers
-
-SAMPLER(sampler_LinearClamp);
-SAMPLER(sampler_LinearRepeat);
-SAMPLER(sampler_PointClamp);
-SAMPLER(sampler_PointRepeat);
+#include "Packages/com.unity.render-pipelines.universal/Shaders/PostProcessing/FXAA3_11.hlsl"
+#endif
 
 // ----------------------------------------------------------------------------------
 // Utility functions
@@ -95,10 +92,6 @@ half3 ApplyVignette(half3 input, float2 uv, float2 center, float intensity, floa
 {
     center = UnityStereoTransformScreenSpaceTex(center);
     float2 dist = abs(uv - center) * intensity;
-
-#if defined(UNITY_SINGLE_PASS_STEREO)
-    dist.x /= unity_StereoScaleOffset[unity_StereoEyeIndex].x;
-#endif
 
     dist.x *= roundness;
     float vfactor = pow(saturate(1.0 - dot(dist, dist)), smoothness);
@@ -165,7 +158,7 @@ half3 ApplyColorGrading(half3 input, float postExposure, TEXTURE2D_PARAM(lutTex,
     return input;
 }
 
-half3 ApplyGrain(half3 input, float2 uv, TEXTURE2D_PARAM(GrainTexture, GrainSampler), float intensity, float response, float2 scale, float2 offset)
+half3 ApplyGrain(half3 input, float2 uv, TEXTURE2D_PARAM(GrainTexture, GrainSampler), float intensity, float response, float2 scale, float2 offset, float oneOverPaperWhite)
 {
     // Grain in range [0;1] with neutral at 0.5
     half grain = SAMPLE_TEXTURE2D(GrainTexture, GrainSampler, uv * scale + offset).w;
@@ -174,13 +167,17 @@ half3 ApplyGrain(half3 input, float2 uv, TEXTURE2D_PARAM(GrainTexture, GrainSamp
     grain = (grain - 0.5) * 2.0;
 
     // Noisiness response curve based on scene luminance
-    float lum = 1.0 - sqrt(Luminance(input));
+    float lum = Luminance(input);
+    #ifdef HDR_INPUT
+    lum *= oneOverPaperWhite;
+    #endif
+    lum = 1.0 - sqrt(lum);
     lum = lerp(1.0, lum, response);
 
     return input + input * grain * intensity * lum;
 }
 
-half3 ApplyDithering(half3 input, float2 uv, TEXTURE2D_PARAM(BlueNoiseTexture, BlueNoiseSampler), float2 scale, float2 offset)
+half3 ApplyDithering(half3 input, float2 uv, TEXTURE2D_PARAM(BlueNoiseTexture, BlueNoiseSampler), float2 scale, float2 offset, float paperWhite, float oneOverPaperWhite)
 {
     // Symmetric triangular distribution on [-1,1] with maximal density at 0
     float noise = SAMPLE_TEXTURE2D(BlueNoiseTexture, BlueNoiseSampler, uv * scale + offset).a * 2.0 - 1.0;
@@ -188,11 +185,71 @@ half3 ApplyDithering(half3 input, float2 uv, TEXTURE2D_PARAM(BlueNoiseTexture, B
 
 #if UNITY_COLORSPACE_GAMMA
     input += noise / 255.0;
+#elif defined(HDR_INPUT)
+    input = input * oneOverPaperWhite;
+    // Do not call GetSRGBToLinear/GetLinearToSRGB because the "fast" version will clamp values!
+    input = SRGBToLinear(LinearToSRGB(input) + noise / 255.0);
+    input = input * paperWhite;
 #else
-    input = GetSRGBToLinear(GetLinearToSRGB(input) + noise / 255.0);
+    input = GetSRGBToLinear(GetLinearToSRGB(input) + noise /255.0);
 #endif
 
     return input;
+}
+
+#if _FXAA
+static const FxaaFloat kSubpixelBlendAmount = 0.65;
+static const FxaaFloat kRelativeContrastThreshold = 0.15;
+static const FxaaFloat kAbsoluteContrastThreshold = 0.03;
+#endif
+
+half3 ApplyFXAA(half3 color, float2 positionNDC, int2 positionSS, float4 sourceSize, TEXTURE2D_X(inputTexture), float paperWhite, float oneOverPaperWhite)
+{
+#if _FXAA
+    FxaaTex tex = {sampler_LinearClamp, _BlitTexture};
+    FxaaFloat4 kUnusedFloat4 = FxaaFloat4(0, 0, 0, 0);
+
+    FxaaFloat4 fxaaConsolePos = 0;
+    FxaaFloat4 kFxaaConsoleRcpFrameOpt = 0;
+    FxaaFloat4 kFxaaConsoleRcpFrameOpt2 = 0;
+    FxaaFloat kFxaaConsoleEdgeSharpness = 0;
+    FxaaFloat kFxaaConsoleEdgeThreshold = 0;
+    FxaaFloat kFxaaConsoleEdgeThresholdMin = 0;
+    FxaaFloat2 fxaaHDROutputPaperWhiteNits = 0;
+
+#if FXAA_PC_CONSOLE == 1
+    fxaaConsolePos = FxaaFloat4(positionNDC.xy - 0.5*sourceSize.zw, positionNDC.xy + 0.5*sourceSize.zw);
+    kFxaaConsoleRcpFrameOpt = 0.5*FxaaFloat4(sourceSize.zw, -sourceSize.zw);
+    kFxaaConsoleRcpFrameOpt2 = 2.0*FxaaFloat4(-sourceSize.zw, sourceSize.zw);
+    kFxaaConsoleEdgeSharpness = 8.0;
+    kFxaaConsoleEdgeThreshold = 0.125;
+    kFxaaConsoleEdgeThresholdMin = 0.05;
+#endif
+    fxaaHDROutputPaperWhiteNits = FxaaFloat2(paperWhite, oneOverPaperWhite);
+
+    return FxaaPixelShader(
+        positionNDC,
+        FxaaFloat4(color, 0),
+        fxaaConsolePos,
+        tex,
+        tex,
+        tex,
+        sourceSize.zw,
+        kFxaaConsoleRcpFrameOpt,
+        kFxaaConsoleRcpFrameOpt2,
+        kUnusedFloat4,
+        kSubpixelBlendAmount,
+        kRelativeContrastThreshold,
+        kAbsoluteContrastThreshold,
+        kFxaaConsoleEdgeSharpness,
+        kFxaaConsoleEdgeThreshold,
+        kFxaaConsoleEdgeThresholdMin,
+        kUnusedFloat4,
+        fxaaHDROutputPaperWhiteNits
+    ).rgb;
+#else
+    return color;
+#endif
 }
 
 #endif // UNIVERSAL_POSTPROCESSING_COMMON_INCLUDED

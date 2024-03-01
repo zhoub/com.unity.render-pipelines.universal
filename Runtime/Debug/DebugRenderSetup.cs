@@ -1,28 +1,27 @@
 using System;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Experimental.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
     class DebugRenderSetup : IDisposable
     {
         private readonly DebugHandler m_DebugHandler;
-        private readonly ScriptableRenderContext m_Context;
-        private readonly CommandBuffer m_CommandBuffer;
+        private readonly FilteringSettings m_FilteringSettings;
         private readonly int m_Index;
+        private DebugDisplaySettingsMaterial MaterialSettings => m_DebugHandler.DebugDisplaySettings.materialSettings;
+        private DebugDisplaySettingsRendering RenderingSettings => m_DebugHandler.DebugDisplaySettings.renderingSettings;
+        private DebugDisplaySettingsLighting LightingSettings => m_DebugHandler.DebugDisplaySettings.lightingSettings;
 
-        private DebugDisplaySettingsMaterial MaterialSettings => m_DebugHandler.DebugDisplaySettings.MaterialSettings;
-        private DebugDisplaySettingsRendering RenderingSettings => m_DebugHandler.DebugDisplaySettings.RenderingSettings;
-        private DebugDisplaySettingsLighting LightingSettings => m_DebugHandler.DebugDisplaySettings.LightingSettings;
-
-        private void Begin()
+        internal void Begin(RasterCommandBuffer cmd)
         {
-            DebugSceneOverrideMode sceneOverrideMode = RenderingSettings.debugSceneOverrideMode;
+            DebugSceneOverrideMode sceneOverrideMode = RenderingSettings.sceneOverrideMode;
 
             switch (sceneOverrideMode)
             {
                 case DebugSceneOverrideMode.Wireframe:
                 {
-                    m_Context.Submit();
-                    GL.wireframe = true;
+                    cmd.SetWireframe(true);
                     break;
                 }
 
@@ -31,29 +30,24 @@ namespace UnityEngine.Rendering.Universal
                 {
                     if (m_Index == 1)
                     {
-                        m_Context.Submit();
-                        GL.wireframe = true;
+                        cmd.SetWireframe(true);
                     }
                     break;
                 }
             }
 
-            m_DebugHandler.SetupShaderProperties(m_CommandBuffer, m_Index);
-
-            m_Context.ExecuteCommandBuffer(m_CommandBuffer);
-            m_CommandBuffer.Clear();
+            m_DebugHandler.SetupShaderProperties(cmd, m_Index);
         }
 
-        private void End()
+        internal void End(RasterCommandBuffer cmd)
         {
-            DebugSceneOverrideMode sceneOverrideMode = RenderingSettings.debugSceneOverrideMode;
+            DebugSceneOverrideMode sceneOverrideMode = RenderingSettings.sceneOverrideMode;
 
             switch (sceneOverrideMode)
             {
                 case DebugSceneOverrideMode.Wireframe:
                 {
-                    m_Context.Submit();
-                    GL.wireframe = false;
+                    cmd.SetWireframe(false);
                     break;
                 }
 
@@ -62,27 +56,53 @@ namespace UnityEngine.Rendering.Universal
                 {
                     if (m_Index == 1)
                     {
-                        m_Context.Submit();
-                        GL.wireframe = false;
+                        cmd.SetWireframe(false);
                     }
                     break;
                 }
             }
         }
 
-        internal DebugRenderSetup(DebugHandler debugHandler, ScriptableRenderContext context, CommandBuffer commandBuffer, int index)
+        internal DebugRenderSetup(DebugHandler debugHandler,
+            int index,
+            FilteringSettings filteringSettings)
         {
             m_DebugHandler = debugHandler;
-            m_Context = context;
-            m_CommandBuffer = commandBuffer;
+            m_FilteringSettings = filteringSettings;
             m_Index = index;
+        }
 
-            Begin();
+        internal void CreateRendererList(
+            ScriptableRenderContext context,
+            ref RenderingData renderingData,
+            ref DrawingSettings drawingSettings,
+            ref FilteringSettings filteringSettings,
+            ref RenderStateBlock renderStateBlock,
+            ref RendererList rendererList)
+        {
+            RenderingUtils.CreateRendererListWithRenderStateBlock(context, renderingData, drawingSettings, filteringSettings, renderStateBlock, ref rendererList);
+        }
+
+        internal void CreateRendererList(
+            RenderGraph renderGraph,
+            ref RenderingData renderingData,
+            ref DrawingSettings drawingSettings,
+            ref FilteringSettings filteringSettings,
+            ref RenderStateBlock renderStateBlock,
+            ref RendererListHandle rendererListHdl)
+        {
+            RenderingUtils.CreateRendererListWithRenderStateBlock(renderGraph, renderingData, drawingSettings, filteringSettings, renderStateBlock, ref rendererListHdl);
+        }
+
+        internal void DrawWithRendererList(RasterCommandBuffer cmd, ref RendererList rendererList)
+        {
+            if(rendererList.isValid)
+                cmd.DrawRendererList(rendererList);
         }
 
         internal DrawingSettings CreateDrawingSettings(DrawingSettings drawingSettings)
         {
-            bool usesReplacementMaterial = (MaterialSettings.DebugVertexAttributeIndexData != DebugVertexAttributeMode.None);
+            bool usesReplacementMaterial = (MaterialSettings.vertexAttributeDebugMode != DebugVertexAttributeMode.None);
 
             if (usesReplacementMaterial)
             {
@@ -100,17 +120,29 @@ namespace UnityEngine.Rendering.Universal
 
         internal RenderStateBlock GetRenderStateBlock(RenderStateBlock renderStateBlock)
         {
-            DebugSceneOverrideMode sceneOverrideMode = RenderingSettings.debugSceneOverrideMode;
+            DebugSceneOverrideMode sceneOverrideMode = RenderingSettings.sceneOverrideMode;
 
             // Potentially override parts of the RenderStateBlock
             switch (sceneOverrideMode)
             {
                 case DebugSceneOverrideMode.Overdraw:
                 {
-                    RenderTargetBlendState additiveBlend = new RenderTargetBlendState(sourceColorBlendMode: BlendMode.One, destinationColorBlendMode: BlendMode.One);
+                    var isOpaque = m_FilteringSettings.renderQueueRange == RenderQueueRange.opaque || m_FilteringSettings.renderQueueRange == RenderQueueRange.all;
+                    var isTransparent = m_FilteringSettings.renderQueueRange == RenderQueueRange.transparent || m_FilteringSettings.renderQueueRange == RenderQueueRange.all;
+                    var overdrawOpaque =
+                        m_DebugHandler.DebugDisplaySettings.renderingSettings.overdrawMode == DebugOverdrawMode.Opaque
+                        || m_DebugHandler.DebugDisplaySettings.renderingSettings.overdrawMode == DebugOverdrawMode.All;
+                    var overdrawTransparent =
+                        m_DebugHandler.DebugDisplaySettings.renderingSettings.overdrawMode == DebugOverdrawMode.Transparent
+                        || m_DebugHandler.DebugDisplaySettings.renderingSettings.overdrawMode == DebugOverdrawMode.All;
+
+                    var blendOverdraw = isOpaque && overdrawOpaque || isTransparent && overdrawTransparent;
+                    var destination = blendOverdraw ? BlendMode.One : BlendMode.Zero;
+
+                    RenderTargetBlendState additiveBlend = new RenderTargetBlendState(sourceColorBlendMode: BlendMode.One, destinationColorBlendMode: destination);
 
                     // Additive-blend but leave z-write and culling as they are when we draw normally
-                    renderStateBlock.blendState = new BlendState {blendState0 = additiveBlend};
+                    renderStateBlock.blendState = new BlendState { blendState0 = additiveBlend };
                     renderStateBlock.mask = RenderStateMask.Blend;
                     break;
                 }
@@ -131,9 +163,10 @@ namespace UnityEngine.Rendering.Universal
             return renderStateBlock;
         }
 
+        internal int GetIndex() { return m_Index; }
+
         public void Dispose()
         {
-            End();
         }
     }
 }

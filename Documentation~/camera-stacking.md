@@ -7,13 +7,15 @@ A Camera Stack consists of a [Base Camera](camera-types-and-render-type.md#base-
 
  URP performs several optimizations within a Camera, including rendering order optimizations to reduce overdraw. However, when you use a Camera Stack, you effectively define the order in which those Cameras are rendered. You must therefore be careful not to order the Cameras in a way that causes excessive overdraw. For more information on overdraw in URP, see [Advanced information](cameras-advanced.md).
 
+For examples of how to use Camera Stacking, see the [Camera Stacking samples in URP Package Samples](package-sample-urp-package-samples.md#camera-stacking).
+
 <a name="adding-a-camera-to-a-camera-stack"></a>
 ## Adding a Camera to a Camera Stack
 
 ![Adding a Camera to a Camera Stack](Images/camera-stack-add-camera.png)
 
-1. Create a Camera in your Scene. Its **Render Type** defaults to **Base**, making it a Base Camera.
-2. Create another Camera in your Scene, and select it.
+1. Create a Camera in your scene. Its **Render Type** defaults to **Base**, making it a Base Camera.
+2. Create another Camera in your scene, and select it.
 3. In the Camera Inspector, change the Camera’s  **Render Type** to **Overlay**.
 4. Select the Base Camera again. In the Camera Inspector, scroll to the Stack section, click the **plus (+)** button, and click the name of the Overlay Camera.
 
@@ -34,9 +36,9 @@ cameraData.cameraStack.Add(myOverlayCamera);
 2. Select the Camera Stack's Base Camera.
 3. In the Camera Inspector, scroll to the Stack section, click the name of the Overlay Camera you want to remove, and then click the **minus (-)** button.
 
-The Overlay Camera remains in the Scene, but is no longer part of the Camera Stack.
+The Overlay Camera remains in the scene, but is no longer part of the Camera Stack.
 
-You can remove a Camera from a Camera Stack in a script by directly manipulating the `cameraStack` property of the Base Camera's [Universal Additional Camera Data](../api/UnityEngine.Rendering.Universal.UniversalAdditionalCameraData.html) component, like this:
+You can remove a Camera from a Camera Stack in a script by directly manipulating the `cameraStack` property of the Base Camera's [Universal Additional Camera Data](xref:UnityEngine.Rendering.Universal.UniversalAdditionalCameraData) component, like this:
 
 ```
 var cameraData = camera.GetUniversalAdditionalCameraData();
@@ -54,20 +56,20 @@ cameraData.cameraStack.Remove(myOverlayCamera);
 
 The Base Camera renders the base layer of the Camera Stack, and the Overlay Cameras in the stack render on top of this in the order that they are listed, from top to bottom.
 
-You can reorder a Camera Stack in a script by directly manipulating the `cameraStack` property of the Base Camera's [Universal Additional Camera Data](../api/UnityEngine.Rendering.Universal.UniversalAdditionalCameraData.html) component.
+You can reorder a Camera Stack in a script by directly manipulating the `cameraStack` property of the Base Camera's [Universal Additional Camera Data](xref:UnityEngine.Rendering.Universal.UniversalAdditionalCameraData) component.
 
 ## Adding the same Overlay Camera to multiple stacks
 
 To add an Overlay Camera to multiple Camera Stacks:
 
 1. Create a Camera Stack that contains at least one Overlay Camera. For instructions, see [Adding a Camera to a Camera Stack](#adding-a-camera-to-a-camera-stack).
-2. Create a Camera in your Scene. Its **Render Type** defaults to **Base**, making it a Base Camera.
+2. Create a Camera in your scene. Its **Render Type** defaults to **Base**, making it a Base Camera.
 3. Select the new Base Camera.
 4. In the Camera Inspector, scroll to the Stack section, click the *plus (+)* button, and click the name of the Overlay Camera that you want to use in both Camera Stacks.
 
 The Overlay Camera is now rendering in both Camera Stacks.
 
-You can also add a Camera to a Camera Stack in a script by directly manipulating the `cameraStack` property of the Base Camera's [Universal Additional Camera Data](../api/UnityEngine.Rendering.Universal.UniversalAdditionalCameraData.html) component, like this:
+You can also add a Camera to a Camera Stack in a script by directly manipulating the `cameraStack` property of the Base Camera's [Universal Additional Camera Data](xref:UnityEngine.Rendering.Universal.UniversalAdditionalCameraData) component, like this:
 
 ```
 var cameraData = camera.GetUniversalAdditionalCameraData();

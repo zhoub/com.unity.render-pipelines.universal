@@ -21,15 +21,21 @@ void InitializeInputData(VaryingsParticle input, SurfaceData surfaceData, out In
 
     inputData.normalWS = NormalizeNormalPerPixel(inputData.normalWS);
 
-#if SHADER_HINT_NICE_QUALITY
     viewDirWS = SafeNormalize(viewDirWS);
-#endif
 
     inputData.viewDirectionWS = viewDirWS;
 
     inputData.fogCoord = InitializeInputDataFog(float4(input.positionWS.xyz, 1.0), input.positionWS.w);
     inputData.vertexLighting = 0;
+#if (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
+    inputData.bakedGI = SAMPLE_GI(input.vertexSH,
+        GetAbsolutePositionWS(inputData.positionWS),
+        inputData.normalWS,
+        inputData.viewDirectionWS,
+        input.clipPos.xy);
+#else
     inputData.bakedGI = SampleSHPixel(input.vertexSH, inputData.normalWS);
+#endif
     inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.clipPos);
     inputData.shadowMask = 1;
     inputData.shadowCoord = 0;
@@ -63,7 +69,6 @@ void InitializeSurfaceData(ParticleParams particleParams, out SurfaceData surfac
     surfaceData.smoothness = 1;
     surfaceData.occlusion = 1;
 
-    surfaceData.albedo = AlphaModulate(surfaceData.albedo, albedo.a);
     surfaceData.alpha = albedo.a;
 
     surfaceData.clearCoatMask       = 0;
@@ -147,7 +152,7 @@ half4 fragParticleUnlit(VaryingsParticle input) : SV_Target
     #endif
 
     finalColor.rgb = MixFog(finalColor.rgb, inputData.fogCoord);
-    finalColor.a = OutputAlpha(finalColor.a, _Surface);
+    finalColor.a = OutputAlpha(finalColor.a, IsSurfaceTypeTransparent(_Surface));
 
     return finalColor;
 }

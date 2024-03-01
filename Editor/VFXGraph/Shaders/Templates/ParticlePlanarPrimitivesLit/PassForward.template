@@ -1,31 +1,31 @@
 // Forward pass
 Pass
 {
-    Tags { "LightMode"="UniversalForward"}
+    Tags { "LightMode"="${VFXURPForwardPassName}"}
 
     ${VFXStencilForward}
-            
+
     HLSLPROGRAM
     #pragma target 4.5
     ${VFXPassForwardLitAdditionalPragma}
     ${VFXURPForwardDefines}
-    //#pragma enable_d3d11_debug_symbols
-            
+
     ${VFXIncludeRP("VFXLitVaryings.template")}
-        
+	${VFXIncludeRP("VFXVertexProbeSampling.template"),VFX_MATERIAL_TYPE_SIX_WAY_SMOKE}
+
     struct ps_input
     {
         float4 pos : SV_POSITION;
-        
+
         ${VFXURPLitDeclareVaryings}
-        
+
         #if USE_FLIPBOOK_INTERPOLATION
         float4 uv : TEXCOORD1;
         #else
         #if USE_FLIPBOOK_ARRAY_LAYOUT
         float3 uv : TEXCOORD1;
         #else
-        float2 uv : TEXCOORD1;    
+        float2 uv : TEXCOORD1;
         #endif
         #endif
         #if USE_SOFT_PARTICLE || USE_ALPHA_TEST || USE_FLIPBOOK_INTERPOLATION || VFX_FEATURE_MOTION_VECTORS_FORWARD
@@ -42,7 +42,7 @@ Pass
         #endif
 
         VFX_OPTIONAL_INTERPOLATION float3 normal : TEXCOORD4;
-        #if USE_NORMAL_MAP || USE_NORMAL_BENDING || SHADERGRAPH_NEEDS_TANGENT_FORWARD
+        #if USE_NORMAL_MAP || USE_NORMAL_BENDING || SHADERGRAPH_NEEDS_TANGENT_FORWARD || VFX_MATERIAL_TYPE_SIX_WAY_SMOKE
         VFX_OPTIONAL_INTERPOLATION float3 tangent : TEXCOORD5;
         #endif
         #if USE_NORMAL_BENDING
@@ -50,14 +50,19 @@ Pass
         #endif
 
         float3 posWS : TEXCOOR9; // Needed for fog
-        
+
         ${VFXAdditionalInterpolantsDeclaration}
-        
+
         UNITY_VERTEX_OUTPUT_STEREO
+        VFX_VERTEX_OUTPUT_INSTANCE_INDEX
     };
-    
-${VFXURPLitVaryingsMacros}    
-    
+
+${VFXURPLitVaryingsMacros}
+
+#if VFX_MATERIAL_TYPE_SIX_WAY_SMOKE
+${VFXVertexProbeVaryingsMacros}
+#endif
+
 #define VFX_VARYING_PS_INPUTS ps_input
 #define VFX_VARYING_POSCS pos
 #define VFX_VARYING_INVSOFTPARTICLEFADEDISTANCE builtInInterpolants.x
@@ -66,7 +71,8 @@ ${VFXURPLitVaryingsMacros}
 #define VFX_VARYING_MOTIONVECTORSCALE builtInInterpolants2.xy
 #define VFX_VARYING_UV uv
 #define VFX_VARYING_NORMAL normal
-#if USE_NORMAL_MAP || USE_NORMAL_BENDING || SHADERGRAPH_NEEDS_TANGENT_FORWARD
+#if USE_NORMAL_MAP || USE_NORMAL_BENDING || SHADERGRAPH_NEEDS_TANGENT_FORWARD || VFX_MATERIAL_TYPE_SIX_WAY_SMOKE
+
 #define VFX_VARYING_TANGENT tangent
 #endif
 #if USE_NORMAL_BENDING
@@ -74,16 +80,20 @@ ${VFXURPLitVaryingsMacros}
 #endif
 #define VFX_VARYING_POSWS posWS
 
+${VFXVertexProbeDeclareFunctions}
+
+
 ${VFXBegin:VFXVertexAdditionalProcess}
 ${VFXURPLitFillVaryings}
+${VFXVertexProbeFillVaryings}
 ${VFXEnd}
-    
+
     ${VFXInclude("Shaders/ParticlePlanarPrimitives/Pass.template")}
     #define SHADERPASS SHADERPASS_FORWARD
     ${VFXIncludeRP("VFXLit.template")}
-                    
+
     ${SHADERGRAPH_PIXEL_CODE_FORWARD}
-                    
+
     #pragma fragment frag
     void frag(ps_input i
     , out float4 outColor : SV_Target0
@@ -97,8 +107,11 @@ ${VFXEnd}
     {
         UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
         VFXTransformPSInputs(i);
+        VFX_FRAG_SETUP_INSTANCE_ID(i);
         ${VFXComputeNormalWS}
-        
+#if !USE_DOUBLE_SIDED
+		const bool frontFace = true;
+#endif
         #ifdef VFX_SHADERGRAPH
             ${VFXAdditionalInterpolantsPreparation}
             ${SHADERGRAPH_PIXEL_CALL_FORWARD}
@@ -106,7 +119,7 @@ ${VFXEnd}
             ${VFXIncludeRP("VFXSGSurfaceData.template")}
             outColor = VFXGetPixelOutputForwardShaderGraph(i, surface, normalWS);
         #else
-            outColor = VFXGetPixelOutputForward(i, normalWS, uvData);
+            outColor = VFXGetPixelOutputForward(i, normalWS, uvData, frontFace);
         #endif
     }
     ENDHLSL

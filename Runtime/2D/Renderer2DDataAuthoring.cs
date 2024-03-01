@@ -44,7 +44,7 @@ namespace UnityEngine.Rendering.Universal
             return null;
         }
 
-        private void OnEnableInEditor()
+        private void InitializeSpriteEditorPrefs()
         {
             // Provide a list of suggested texture property names to Sprite Editor via EditorPrefs.
             const string suggestedNamesKey = "SecondarySpriteTexturePropertyNames";
@@ -73,16 +73,17 @@ namespace UnityEngine.Rendering.Universal
             ResourceReloader.TryReloadAllNullIn(this, UniversalRenderPipelineAsset.packagePath);
         }
 
-        private void Awake()
+        void RebuildBlendStyles(bool force = false)
         {
-            if (m_LightBlendStyles != null)
+            // Initialize Light Blend Styles
+            if (m_LightBlendStyles != null && !force)
             {
                 for (int i = 0; i < m_LightBlendStyles.Length; ++i)
                 {
                     ref var blendStyle = ref m_LightBlendStyles[i];
 
                     // Custom blend mode (99) now falls back to Multiply.
-                    if ((int)blendStyle.blendMode == 99)
+                    if ((int) blendStyle.blendMode == 99)
                         blendStyle.blendMode = Light2DBlendStyle.BlendMode.Multiply;
                 }
 
@@ -104,8 +105,20 @@ namespace UnityEngine.Rendering.Universal
             m_LightBlendStyles[3].name = "Additive with Mask";
             m_LightBlendStyles[3].blendMode = Light2DBlendStyle.BlendMode.Additive;
             m_LightBlendStyles[3].maskTextureChannel = Light2DBlendStyle.TextureChannel.R;
+
+            // Initialize Editor Prefs for Sprite Editor
+            InitializeSpriteEditorPrefs();
         }
 
+        private void Awake()
+        {
+            RebuildBlendStyles();
+        }
+
+        void Reset()
+        {
+            RebuildBlendStyles(true);
+        }
 #endif
     }
 }

@@ -6,6 +6,10 @@ using System;
 
 namespace UnityEngine.Rendering.Universal
 {
+    /// <summary>
+    /// Class containing shader resources needed in URP for XR.
+    /// </summary>
+    /// <seealso cref="Shader"/>
     [Serializable]
     public class XRSystemData : ScriptableObject
     {
@@ -22,7 +26,7 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        [MenuItem("Assets/Create/Rendering/URP XR System Data", priority = CoreUtils.Sections.section5 + CoreUtils.Priorities.assetsCreateRenderingMenuPriority)]
+        [MenuItem("Assets/Create/Rendering/URP XR System Data", priority = CoreUtils.Sections.section5 + CoreUtils.Priorities.assetsCreateRenderingMenuPriority + 1)]
         static void CreateXRSystemData()
         {
             ProjectWindowUtil.StartNameEditingIfProjectWindowExists(0, CreateInstance<CreateXRSystemDataAsset>(), "CustomXRSystemData.asset", null, null);
@@ -30,16 +34,28 @@ namespace UnityEngine.Rendering.Universal
 
 #endif
 
+        /// <summary>
+        /// Class containing shader resources used in URP for XR.
+        /// </summary>
         [Serializable, ReloadGroup]
         public sealed class ShaderResources
         {
+            /// <summary>
+            /// XR Occlusion mesh shader.
+            /// </summary>
             [Reload("Shaders/XR/XROcclusionMesh.shader")]
             public Shader xrOcclusionMeshPS;
 
+            /// <summary>
+            /// XR Mirror View shader.
+            /// </summary>
             [Reload("Shaders/XR/XRMirrorView.shader")]
             public Shader xrMirrorViewPS;
         }
 
+        /// <summary>
+        /// Shader resources used in URP for XR.
+        /// </summary>
         public ShaderResources shaders;
     }
 }

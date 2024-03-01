@@ -31,61 +31,49 @@ void SetupDebugDataBrdf(inout InputData inputData, half3 brdfDiffuse, half3 brdf
 
 bool UpdateSurfaceAndInputDataForDebug(inout SurfaceData surfaceData, inout InputData inputData)
 {
-    #if SHADER_API_VULKAN || SHADER_API_GLES || SHADER_API_GLES3 || SHADER_API_GLCORE
-        // Something about this function is problematic for HLSLcc (generates forbidden 'uintBitsToFloat' intrinsics).
-        // Re-enable when this is fixed.
-        return false;
-    #else
-        bool changed = false;
+    bool changed = false;
 
-        if (_DebugLightingMode == DEBUGLIGHTINGMODE_LIGHTING_WITHOUT_NORMAL_MAPS || _DebugLightingMode == DEBUGLIGHTINGMODE_LIGHTING_WITH_NORMAL_MAPS)
+    if (_DebugLightingMode == DEBUGLIGHTINGMODE_LIGHTING_WITHOUT_NORMAL_MAPS || _DebugLightingMode == DEBUGLIGHTINGMODE_LIGHTING_WITH_NORMAL_MAPS)
+    {
+        surfaceData.albedo = 1;
+        surfaceData.emission = 0;
+        surfaceData.specular = 0;
+        surfaceData.occlusion = 1;
+        surfaceData.clearCoatMask = 0;
+        surfaceData.clearCoatSmoothness = 1;
+        surfaceData.metallic = 0;
+        surfaceData.smoothness = 0;
+        changed = true;
+    }
+    else if (_DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS || _DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS_WITH_SMOOTHNESS)
+    {
+        surfaceData.albedo = 0;
+        surfaceData.emission = 0;
+        surfaceData.occlusion = 1;
+        surfaceData.clearCoatMask = 0;
+        surfaceData.clearCoatSmoothness = 1;
+        surfaceData.specular = 1;
+        surfaceData.metallic = 0;
+        if (_DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS)
         {
-            surfaceData.albedo = 1;
-            surfaceData.emission = 0;
-            surfaceData.specular = 0;
-            surfaceData.occlusion = 1;
-            surfaceData.clearCoatMask = 0;
-            surfaceData.clearCoatSmoothness = 1;
-            surfaceData.metallic = 0;
-            surfaceData.smoothness = 0;
-            changed = true;
+            surfaceData.smoothness = 1;
         }
-        else if (_DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS || _DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS_WITH_SMOOTHNESS)
-        {
-            surfaceData.albedo = 0;
-            surfaceData.emission = 0;
-            surfaceData.occlusion = 1;
-            surfaceData.clearCoatMask = 0;
-            surfaceData.clearCoatSmoothness = 1;
-            if (_DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS)
-            {
-                surfaceData.specular = 1;
-                surfaceData.metallic = 0;
-                surfaceData.smoothness = 1;
-            }
-            else if (_DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS_WITH_SMOOTHNESS)
-            {
-                surfaceData.specular = 0;
-                surfaceData.metallic = 1;
-                surfaceData.smoothness = 0;
-            }
-            changed = true;
-        }
+        changed = true;
+    }
 
-        if (_DebugLightingMode == DEBUGLIGHTINGMODE_LIGHTING_WITHOUT_NORMAL_MAPS || _DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS)
-        {
-            const half3 normalTS = half3(0, 0, 1);
-            #if defined(_NORMALMAP)
-            inputData.normalWS = TransformTangentToWorld(normalTS, inputData.tangentToWorld);
-            #else
-            inputData.normalWS = inputData.normalWS;
-            #endif
-            surfaceData.normalTS = normalTS;
-            changed = true;
-        }
+    if (_DebugLightingMode == DEBUGLIGHTINGMODE_LIGHTING_WITHOUT_NORMAL_MAPS || _DebugLightingMode == DEBUGLIGHTINGMODE_REFLECTIONS)
+    {
+        const half3 normalTS = half3(0, 0, 1);
+        #if defined(_NORMALMAP)
+        inputData.normalWS = TransformTangentToWorld(normalTS, inputData.tangentToWorld);
+        #else
+        inputData.normalWS = inputData.normalWS;
+        #endif
+        surfaceData.normalTS = normalTS;
+        changed = true;
+    }
 
-        return changed;
-    #endif
+    return changed;
 }
 
 bool CalculateValidationMetallic(half3 albedo, half metallic, inout half4 debugColor)
@@ -198,20 +186,36 @@ half3 CalculateDebugShadowCascadeColor(in InputData inputData)
 {
     float3 positionWS = inputData.positionWS;
     half cascadeIndex = ComputeCascadeIndex(positionWS);
+
     switch (uint(cascadeIndex))
     {
-        case 0: return kDebugColorBrightRed.rgb;
-        case 1: return kDebugColorDarkYellow.rgb;
-        case 2: return kDebugColorSkyBlue.rgb;
-        case 3: return kDebugColorBrightGreen.rgb;
+        case 0: return kDebugColorShadowCascade0.rgb;
+        case 1: return kDebugColorShadowCascade1.rgb;
+        case 2: return kDebugColorShadowCascade2.rgb;
+        case 3: return kDebugColorShadowCascade3.rgb;
         default: return kDebugColorBlack.rgb;
     }
 }
 
 half4 CalculateDebugLightingComplexityColor(in InputData inputData, in SurfaceData surfaceData)
 {
+#if USE_FORWARD_PLUS
+    int numLights = URP_FP_DIRECTIONAL_LIGHTS_COUNT;
+    uint entityIndex;
+    ClusterIterator it = ClusterInit(inputData.normalizedScreenSpaceUV, inputData.positionWS, 0);
+    [loop] while (ClusterNext(it, entityIndex))
+    {
+        numLights++;
+    }
+    it = ClusterInit(inputData.normalizedScreenSpaceUV, inputData.positionWS, 1);
+    [loop] while (ClusterNext(it, entityIndex))
+    {
+        numLights++;
+    }
+#else
     // Assume a main light and add 1 to the additional lights.
     int numLights = GetAdditionalLightsCount() + 1;
+#endif
 
     const uint2 tileSize = uint2(32,32);
     const uint maxLights = 9;
@@ -237,6 +241,11 @@ bool CanDebugOverrideOutputColor(inout InputData inputData, inout SurfaceData su
         debugColor = CalculateDebugLightingComplexityColor(inputData, surfaceData);
         return true;
     }
+    else if (_DebugLightingMode == DEBUGLIGHTINGMODE_GLOBAL_ILLUMINATION)
+    {
+        debugColor = half4(inputData.bakedGI, surfaceData.alpha);
+        return true;
+    }
     else
     {
         debugColor = half4(0, 0, 0, 1);
@@ -252,6 +261,12 @@ bool CanDebugOverrideOutputColor(inout InputData inputData, inout SurfaceData su
                 // If we've modified any data we'll need to re-sample the GI to ensure that everything works correctly...
                 #if defined(DYNAMICLIGHTMAP_ON)
                 inputData.bakedGI = SAMPLE_GI(inputData.staticLightmapUV, inputData.dynamicLightmapUV.xy, inputData.vertexSH, inputData.normalWS);
+                #elif !defined(LIGHTMAP_ON) && (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
+                inputData.bakedGI = SAMPLE_GI(inputData.vertexSH,
+                    GetAbsolutePositionWS(inputData.positionWS),
+                    inputData.normalWS,
+                    inputData.viewDirectionWS,
+                    inputData.positionCS.xy);
                 #else
                 inputData.bakedGI = SAMPLE_GI(inputData.staticLightmapUV, inputData.vertexSH, inputData.normalWS);
                 #endif
@@ -272,6 +287,11 @@ bool CanDebugOverrideOutputColor(inout InputData inputData, inout SurfaceData su
         debugColor = CalculateDebugLightingComplexityColor(inputData, surfaceData);
         return true;
     }
+    else if (_DebugLightingMode == DEBUGLIGHTINGMODE_GLOBAL_ILLUMINATION)
+    {
+        debugColor = half4(inputData.bakedGI, surfaceData.alpha);
+        return true;
+    }
     else
     {
         if (_DebugLightingMode == DEBUGLIGHTINGMODE_SHADOW_CASCADES)
@@ -285,6 +305,12 @@ bool CanDebugOverrideOutputColor(inout InputData inputData, inout SurfaceData su
                 // If we've modified any data we'll need to re-sample the GI to ensure that everything works correctly...
                 #if defined(DYNAMICLIGHTMAP_ON)
                 inputData.bakedGI = SAMPLE_GI(inputData.staticLightmapUV, inputData.dynamicLightmapUV.xy, inputData.vertexSH, inputData.normalWS);
+                #elif !defined(LIGHTMAP_ON) && (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
+                inputData.bakedGI = SAMPLE_GI(inputData.vertexSH,
+                    GetAbsolutePositionWS(inputData.positionWS),
+                    inputData.normalWS,
+                    inputData.viewDirectionWS,
+                    inputData.positionCS.xy);
                 #else
                 inputData.bakedGI = SAMPLE_GI(inputData.staticLightmapUV, inputData.vertexSH, inputData.normalWS);
                 #endif

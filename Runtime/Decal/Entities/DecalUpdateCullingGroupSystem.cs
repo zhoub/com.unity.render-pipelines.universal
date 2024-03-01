@@ -26,8 +26,8 @@ namespace UnityEngine.Rendering.Universal
 
         public override void SetCapacity(int newCapacity)
         {
-            ResizeArray(ref visibleDecalIndexArray, newCapacity);
-            ResizeNativeArray(ref visibleDecalIndices, newCapacity);
+            ArrayExtensions.ResizeArray(ref visibleDecalIndexArray, newCapacity);
+            visibleDecalIndices.ResizeArray(newCapacity);
             if (cullingGroups == null)
                 cullingGroups = new CullingGroup();
             capacity = newCapacity;
@@ -52,6 +52,15 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     internal class DecalUpdateCullingGroupSystem
     {
+        /// <summary>
+        /// Provides acces to the bounding distance.
+        /// </summary>
+        public float boundingDistance
+        {
+            get { return m_BoundingDistance[0]; }
+            set { m_BoundingDistance[0] = value; }
+        }
+
         private float[] m_BoundingDistance = new float[1];
         private Camera m_Camera;
         private DecalEntityManager m_EntityManager;
@@ -66,7 +75,7 @@ namespace UnityEngine.Rendering.Universal
 
         public void Execute(Camera camera)
         {
-            using (new ProfilingScope(null, m_Sampler))
+            using (new ProfilingScope(m_Sampler))
             {
                 m_Camera = camera;
                 for (int i = 0; i < m_EntityManager.chunkCount; ++i)

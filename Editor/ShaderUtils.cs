@@ -8,6 +8,9 @@ using UnityEditor.Rendering.Universal.ShaderGUI;
 
 namespace Unity.Rendering.Universal
 {
+    /// <summary>
+    /// Various utility functions for shaders in URP.
+    /// </summary>
     public static class ShaderUtils
     {
         internal enum ShaderID
@@ -25,10 +28,16 @@ namespace Unity.Rendering.Universal
             SpeedTree7 = ShaderPathID.SpeedTree7,
             SpeedTree7Billboard = ShaderPathID.SpeedTree7Billboard,
             SpeedTree8 = ShaderPathID.SpeedTree8,
+            ComplexLit = ShaderPathID.ComplexLit,
 
             // ShaderGraph IDs start at 1000, correspond to subtargets
             SG_Unlit = 1000,        // UniversalUnlitSubTarget
             SG_Lit,                 // UniversalLitSubTarget
+            SG_Decal,               // UniversalDecalSubTarget
+            SG_SpriteUnlit,         // UniversalSpriteUnlitSubTarget
+            SG_SpriteLit,           // UniversalSpriteLitSubTarget
+            SG_SpriteCustomLit,      // UniversalSpriteCustomLitSubTarget
+            SG_SixWaySmokeLit       // UniversalSixWaySubTarget
         }
 
         internal static bool IsShaderGraph(this ShaderID id)
@@ -53,12 +62,52 @@ namespace Unity.Rendering.Universal
             }
         }
 
+        internal static bool HasMotionVectorLightModeTag(ShaderID id)
+        {
+            // Currently only these ShaderIDs have a pass with a { "LightMode" = "MotionVectors" } tag in URP
+            // (this is a more efficient check than looping over all sub-shaders and their passes and checking the
+            // "LightMode" tag value with FindPassTagValue)
+            switch(id)
+            {
+                case ShaderID.Lit:
+                case ShaderID.Unlit:
+                case ShaderID.SimpleLit:
+                case ShaderID.ComplexLit:
+                case ShaderID.BakedLit:
+                case ShaderID.SG_Unlit:
+                case ShaderID.SG_Lit:
+                    return true;
+            }
+
+            return false;
+        }
+
         internal enum MaterialUpdateType
         {
             CreatedNewMaterial,
             ChangedAssignedShader,
             ModifiedShader,
             ModifiedMaterial
+        }
+
+        //Helper used by VFX, allow retrieval of ShaderID on another object than material.shader
+        //In case of ShaderGraph integration, the material.shader is actually pointing to VisualEffectAsset
+        internal static void UpdateMaterial(Material material, MaterialUpdateType updateType, UnityEngine.Object assetWithURPMetaData)
+        {
+            var currentShaderId = ShaderUtils.ShaderID.Unknown;
+            if (assetWithURPMetaData != null)
+            {
+                var path = AssetDatabase.GetAssetPath(assetWithURPMetaData);
+                foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(path))
+                {
+                    if (asset is UniversalMetadata metadataAsset)
+                    {
+                        currentShaderId = metadataAsset.shaderID;
+                        break;
+                    }
+                }
+            }
+            UpdateMaterial(material, updateType, currentShaderId);
         }
 
         // this is used to update a material's keywords, applying any shader-associated logic to update dependent properties and keywords
@@ -90,11 +139,26 @@ namespace Unity.Rendering.Universal
                 case ShaderID.ParticlesUnlit:
                     ParticlesUnlitShader.SetMaterialKeywords(material, null, ParticleGUI.SetMaterialKeywords);
                     break;
+                case ShaderID.SpeedTree8:
+                    ShaderGraphLitGUI.UpdateMaterial(material, updateType);
+                    break;
                 case ShaderID.SG_Lit:
                     ShaderGraphLitGUI.UpdateMaterial(material, updateType);
                     break;
                 case ShaderID.SG_Unlit:
                     ShaderGraphUnlitGUI.UpdateMaterial(material, updateType);
+                    break;
+                case ShaderID.SG_Decal:
+                    break;
+                case ShaderID.SG_SpriteUnlit:
+                    break;
+                case ShaderID.SG_SpriteLit:
+                    break;
+                case ShaderID.SG_SpriteCustomLit:
+                    break;
+                case ShaderID.SG_SixWaySmokeLit:
+                    ShaderGraphLitGUI.UpdateMaterial(material, updateType);
+                    SixWayGUI.UpdateSixWayKeywords(material);
                     break;
                 default:
                     break;

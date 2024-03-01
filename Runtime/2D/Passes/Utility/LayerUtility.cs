@@ -1,15 +1,24 @@
 using Unity.Mathematics;
+using System.Collections.Generic;
 
 namespace UnityEngine.Rendering.Universal
 {
     internal struct LayerBatch
     {
+#if UNITY_EDITOR
+        public int startIndex;
+        public int endIndex;
+#endif
         public int startLayerID;
         public int endLayerValue;
         public SortingLayerRange layerRange;
         public LightStats lightStats;
         private unsafe fixed int renderTargetIds[4];
         private unsafe fixed bool renderTargetUsed[4];
+
+        public List<Light2D> lights;
+        public List<Light2D> shadowLights;
+        public List<ShadowCasterGroup2D> shadowCasters;
 
         public void InitRTIds(int index)
         {
@@ -21,6 +30,10 @@ namespace UnityEngine.Rendering.Universal
                     renderTargetIds[i] = Shader.PropertyToID($"_LightTexture_{index}_{i}");
                 }
             }
+
+            lights = new List<Light2D>();
+            shadowLights = new List<Light2D>();
+            shadowCasters = new List<ShadowCasterGroup2D>();
         }
 
         public RenderTargetIdentifier GetRTId(CommandBuffer cmd, RenderTextureDescriptor desc, int index)
@@ -66,12 +79,24 @@ namespace UnityEngine.Rendering.Universal
         {
             var layerId1 = sortingLayers[layerIndex1].id;
             var layerId2 = sortingLayers[layerIndex2].id;
+
             foreach (var light in lightCullResult.visibleLights)
             {
-                // If the lit layers are different, or if they are lit but this is a shadow casting light then don't batch.
-                if ((light.IsLitLayer(layerId1) != light.IsLitLayer(layerId2)) || (light.IsLitLayer(layerId1) && light.shadowsEnabled))
+                // If the lit layers are different don't batch.
+                if (light.IsLitLayer(layerId1) != light.IsLitLayer(layerId2))
                     return false;
             }
+
+            foreach (var group in lightCullResult.visibleShadows)
+            {
+                foreach (var shadowCaster in group.GetShadowCasters())
+                {
+                    // Don't batch when the layer has different shadow casters
+                    if (shadowCaster.IsShadowedLayer(layerId1) != shadowCaster.IsShadowedLayer(layerId2))
+                        return false;
+                }
+            }
+
             return true;
         }
 
@@ -122,10 +147,10 @@ namespace UnityEngine.Rendering.Universal
             for (var i = 0; i < cachedSortingLayers.Length;)
             {
                 var layerToRender = cachedSortingLayers[i].id;
-                var lightStats = lightCullResult.GetLightStatsByLayer(layerToRender);
                 ref var layerBatch = ref s_LayerBatches[batchCount++];
+                var lightStats = lightCullResult.GetLightStatsByLayer(layerToRender, ref layerBatch);
 
-                // Find the highest layer that share the same set of lights as this layer.
+                // Find the highest layer that share the same set of lights and shadows as this layer.
                 var upperLayerInBatch = FindUpperBoundInBatch(i, cachedSortingLayers, lightCullResult);
 
                 // Some renderers override their sorting layer value with short.MinValue or short.MaxValue.
@@ -139,6 +164,10 @@ namespace UnityEngine.Rendering.Universal
                 // Renderer within this range share the same set of lights so they should be rendered together.
                 var sortingLayerRange = new SortingLayerRange(lowerBound, upperBound);
 
+#if UNITY_EDITOR
+                layerBatch.startIndex = i;
+                layerBatch.endIndex = upperLayerInBatch;
+#endif
                 layerBatch.startLayerID = layerToRender;
                 layerBatch.endLayerValue = endLayerValue;
                 layerBatch.layerRange = sortingLayerRange;
@@ -148,6 +177,21 @@ namespace UnityEngine.Rendering.Universal
             }
 
             return s_LayerBatches;
+        }
+
+        public static void GetFilterSettings(Renderer2DData rendererData, ref LayerBatch layerBatch, short cameraSortingLayerBoundsIndex, out FilteringSettings filterSettings)
+        {
+            filterSettings = new FilteringSettings();
+            filterSettings.renderQueueRange = RenderQueueRange.all;
+            filterSettings.layerMask = -1;
+            filterSettings.renderingLayerMask = 0xFFFFFFFF;
+
+            short upperBound = layerBatch.layerRange.upperBound;
+
+            if (rendererData.useCameraSortingLayerTexture && cameraSortingLayerBoundsIndex >= layerBatch.layerRange.lowerBound && cameraSortingLayerBoundsIndex < layerBatch.layerRange.upperBound)
+                upperBound = cameraSortingLayerBoundsIndex;
+
+            filterSettings.sortingLayerRange = new SortingLayerRange(layerBatch.layerRange.lowerBound, upperBound);
         }
     }
 }
